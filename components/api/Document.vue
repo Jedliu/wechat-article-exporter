@@ -39,6 +39,10 @@ const host = window.location.protocol + '//' + window.location.host;
       <p class="font-semibold mb-2">简要描述</p>
       <p class="font-serif">{{ description }}</p>
     </div>
+    <div v-if="remark">
+      <p class="font-semibold mb-2">备注:</p>
+      <p class="text-rose-500">{{ remark }}</p>
+    </div>
     <div>
       <p class="font-semibold mb-2">请求URL:</p>
       <p class="font-mono border p-2 rounded-md">
@@ -85,10 +89,6 @@ const host = window.location.protocol + '//' + window.location.host;
         <UToggle v-model="open" color="blue" on-icon="i-heroicons:eye" off-icon="i-heroicons:eye-slash" />
       </p>
       <CodeSegment v-if="open" :code="responseSample" lang="json" />
-    </div>
-    <div v-if="remark">
-      <p class="font-semibold mb-2">备注:</p>
-      <p>{{ remark }}</p>
     </div>
   </div>
 </template>

@@ -3,8 +3,9 @@ import type { ChipColor } from '#ui/types';
 import CredentialsDialog, { type CredentialState } from '~/components/global/CredentialsDialog.vue';
 import { docsWebSite } from '~/config';
 import { gotoLink } from '~/utils';
+import QQGroupModal from '~/components/modal/QQGroup.vue';
 
-// const { loggedIn } = useUserSession();
+const modal = useModal();
 
 // CredentialDialog 相关变量
 const credentialsDialogOpen = ref(false);
@@ -29,8 +30,6 @@ const credentialBadgeText = computed(() => {
   return count > 9 ? '+' : `${count}`;
 });
 const isCredentialActive = computed(() => credentialState.value === 'active');
-
-const authPanelOpen = ref(false);
 </script>
 
 <template>
@@ -43,6 +42,16 @@ const authPanelOpen = ref(false);
     <!--        </UChip>-->
     <!--      </UTooltip>-->
     <!--    </li>-->
+
+    <li>
+      <UTooltip text="加入QQ群">
+        <UIcon
+          @click="modal.open(QQGroupModal)"
+          name="i-tdesign:logo-qq-filled"
+          class="size-7 text-zinc-400 hover:text-blue-500 cursor-pointer transition-colors"
+        />
+      </UTooltip>
+    </li>
 
     <!-- Credential -->
     <li>
@@ -93,16 +102,5 @@ const authPanelOpen = ref(false);
         />
       </UTooltip>
     </li>
-
-    <!-- 邮箱登录 -->
-    <!--    <li>-->
-    <!--      <UPopover v-model:open="authPanelOpen" :popper="{ placement: 'bottom-end' }" overlay>-->
-    <!--        <UIcon :name="loggedIn ? 'i-lucide:user-check' : 'i-lucide:user'" class="action-icon" />-->
-
-    <!--        <template #panel>-->
-    <!--          <AuthPopoverPanel v-model:open="authPanelOpen" />-->
-    <!--        </template>-->
-    <!--      </UPopover>-->
-    <!--    </li>-->
   </ul>
 </template>

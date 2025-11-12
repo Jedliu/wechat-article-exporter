@@ -7,6 +7,7 @@
 ![GitHub stars]
 ![GitHub forks]
 ![GitHub License]
+![Package Version]
 
 
 一款在线的 **微信公众号文章批量下载** 工具，支持导出阅读量与评论数据，无需搭建任何环境，可通过 [在线网站] 使用，同时也支持 docker 私有化部署和 Cloudflare 部署。
@@ -88,6 +89,9 @@ MIT
 [GitHub forks]: https://img.shields.io/github/forks/wechat-article/wechat-article-exporter?style=social&label=Fork&style=plastic
 
 [GitHub License]: https://img.shields.io/github/license/wechat-article/wechat-article-exporter?label=License
+
+[Package Version]: https://img.shields.io/github/package-json/v/wechat-article/wechat-article-exporter
+
 
 [Deno Deploy]: https://deno.com/deploy
 

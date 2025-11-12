@@ -94,7 +94,7 @@ const loading = ref(false);
 async function loadCacheHtml() {
   loading.value = true;
   try {
-    htmlCode.value = await Exporter.getPureContent(url.value, 'html');
+    htmlCode.value = await Exporter.getHtmlContent(url.value);
   } finally {
     loading.value = false;
   }

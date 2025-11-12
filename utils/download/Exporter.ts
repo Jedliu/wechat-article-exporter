@@ -443,6 +443,12 @@ export class Exporter extends BaseDownload {
     }
   }
 
+  static async getHtmlContent(url: string) {
+    const parser = new DOMParser();
+    const exporter = new Exporter([]);
+    return exporter.getPureContent(url, 'html', parser);
+  }
+
   // 调整最终的 html
   private async normalizeHtml(
     cachedHtml: HtmlAsset,

@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import { isInsider } from '~/config/insider';
-
 interface NavItem {
   name: string;
   icon: string;
@@ -19,16 +17,12 @@ const items = ref<NavItem[]>([
   { name: '设置', icon: 'i-lucide:settings', href: '/dashboard/settings' },
   { name: '技术支持 & 赞助', icon: 'i-lucide:heart-handshake', href: '/dashboard/support' },
 ]);
-
-const filteredItems = computed(() => {
-  return items.value.filter(item => (isInsider.value ? true : !item.insider));
-});
 </script>
 
 <template>
   <nav class="flex-1 mt-6">
     <ul class="flex flex-col gap-2">
-      <li v-for="item in filteredItems" :key="item.name">
+      <li v-for="item in items" :key="item.name">
         <NuxtLink :to="item.href" class="flex h-8 items-center gap-2 rounded-md px-2 text-sm nav-link">
           <UIcon :name="item.icon" class="size-5 opacity-80" />
           <p>{{ item.name }}</p>

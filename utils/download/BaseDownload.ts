@@ -171,10 +171,6 @@ export class BaseDownload {
 
   // 验证输入 urls 是否全部合法
   protected validateInputs(urls: string[]): void {
-    if (urls.length === 0) {
-      throw new Error('至少需要下载一个URL');
-    }
-
     urls.forEach(url => {
       try {
         new URL(url);

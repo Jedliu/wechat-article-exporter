@@ -1,6 +1,5 @@
 import * as cheerio from 'cheerio';
 import TurndownService from 'turndown';
-import { getTokenFromStore } from '~/server/utils/CookieStore';
 import { USER_AGENT } from '~/config';
 
 interface SearchBizQuery {
@@ -9,17 +8,6 @@ interface SearchBizQuery {
 }
 
 export default defineEventHandler(async event => {
-  const token = await getTokenFromStore(event);
-
-  if (!token) {
-    return {
-      base_resp: {
-        ret: -1,
-        err_msg: '认证信息无效',
-      },
-    };
-  }
-
   const query = getQuery<SearchBizQuery>(event);
   if (!query.url) {
     return {
@@ -88,7 +76,14 @@ function normalizeHtml(rawHTML: string, format: 'html' | 'text' = 'html'): strin
 
   if (format === 'text') {
     // 获取纯文本内容
-    return $jsArticleContent.text().trim();
+    const text = $jsArticleContent.text().trim().replace(/\n+/g, '\n').replace(/ +/g, ' ');
+    // 分割成行
+    const lines = text.split('\n');
+    // 过滤掉全空白行（^\s*$ 表示行首到行尾全是空白字符）
+    const filteredLines = lines.filter(line => !/^\s*$/.test(line));
+
+    // 重新连接行
+    return filteredLines.join('\n');
   } else if (format === 'html') {
     // 获取修改后的 HTML
     let bodyCls = $('body').attr('class');

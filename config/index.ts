@@ -73,7 +73,7 @@ export const ACCOUNT_TYPE: Record<number, string> = {
  */
 
 /**
- * 公共代理
+ * 公共代理节点
  */
 export const PUBLIC_PROXY_LIST: string[] = [
   'https://00.worker-proxy.asia',
@@ -126,7 +126,7 @@ export const docsWebSite = 'https://docs.mptext.top';
 
 export const apis = [
   {
-    name: '搜索公众号',
+    name: '根据关键字搜索公众号',
     description: '根据公众号名称或关键字查询公众号列表。',
     url: '/api/public/v1/account',
     method: 'GET',
@@ -187,6 +187,43 @@ export const apis = [
           verify_status: 2,
         },
       ],
+    },
+  },
+  {
+    name: '根据文章链接搜索公众号',
+    description: '根据公众号文章链接查询公众号。',
+    url: '/api/public/v1/accountbyurl',
+    method: 'GET',
+    params: [
+      {
+        label: '文章链接',
+        name: 'url',
+        location: 'query',
+        required: true,
+        default: 'N/A',
+        type: 'String',
+        remark: '',
+      },
+    ],
+    responseSample: {
+      base_resp: {
+        ret: 0,
+        err_msg: 'ok',
+      },
+      list: [
+        {
+          fakeid: 'MzA3NTg4MDUzNQ==',
+          nickname: '肖小跑',
+          alias: '',
+          round_head_img:
+            'http://mmbiz.qpic.cn/mmbiz_png/TEq4bibSxYafowUFshRICokwNXiaUB9zCX3vicx8FuhTCGibTa478JI72bkbpa89ssAqEFm2ib1S1LB0FEjHycjib8OA/0?wx_fmt=png',
+          service_type: 1,
+          signature:
+            '金融世界不讲道理的时候，向文史哲求救，大概率“叮”的一下就扣上了。因为在这里，您才能再次看到“人”：人的情绪，人的荒诞，人的大举动小动作。这里有世界最本质的规律。',
+          verify_status: 0,
+        },
+      ],
+      total: 1,
     },
   },
   {
@@ -369,6 +406,7 @@ export const apis = [
       },
     ],
     responseSample: {},
+    remark: '此接口不需要 API 密钥',
   },
 ];
 

@@ -33,9 +33,14 @@
                   :disabled="monitoring || wsMonitoring"
                   placeholder="请输入 ws 监听地址"
                 />
-                <UButton v-if="!wsMonitoring" :disabled="!wsURL || monitoring" color="blue" @click="startListenService(true)"
-                  >开始监控</UButton
+                <UButton
+                  v-if="!wsMonitoring"
+                  :disabled="!wsURL || monitoring"
+                  color="blue"
+                  @click="startListenService(true)"
                 >
+                  开始监控
+                </UButton>
                 <UButton v-else icon="i-line-md:loading-twotone-loop" color="green" @click="stopListenService"
                   >监控中，结束监控</UButton
                 >
@@ -99,18 +104,8 @@
             <p>fakeid: {{ credential.biz }}</p>
             <p>获取时间: {{ credential.time }}</p>
             <div class="flex items-center justify-between mt-4">
-              <span
-                v-if="credential.valid"
-                class="font-sans font-bold text-green-500"
-              >
-                有效
-              </span>
-              <span
-                v-else
-                class="font-sans font-bold text-rose-500"
-              >
-                已过期
-              </span>
+              <span v-if="credential.valid" class="font-sans font-bold text-green-500">有效</span>
+              <span v-else class="font-sans font-bold text-rose-500">已过期</span>
               <UButton
                 size="xs"
                 :color="credential.added ? 'green' : 'blue'"
@@ -241,9 +236,9 @@ function scheduleListenRetry() {
   if (listenRetryTimer) {
     window.clearTimeout(listenRetryTimer);
   }
-  
+
   // 如果是手动停止的，则不重试
-  if(manulStopped) return;
+  if (manulStopped) return;
 
   listenRetryTimer = window.setTimeout(() => {
     startListenService();
@@ -453,7 +448,6 @@ async function startListenService(isManual = false) {
     scheduleListenRetry();
   });
   ws.addEventListener('error', evt => {
-    console.error(evt);
     scheduleListenRetry();
   });
 }
