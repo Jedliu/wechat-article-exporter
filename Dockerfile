@@ -41,6 +41,9 @@ WORKDIR /app
 # 复制构建输出
 COPY --from=build-env /app/.output ./
 
+# 创建 KV 存储目录并设置权限（以 root 运行，确保 node 用户可写）
+RUN mkdir -p .data/kv && chown -R node:node /app
+
 # 创建非 root 用户（使用内置 node 用户）
 USER node
 

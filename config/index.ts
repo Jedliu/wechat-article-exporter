@@ -1,4 +1,4 @@
-export const isDev = !import.meta.env.PROD;
+export const isDev = process.env.NODE_ENV === 'development';
 
 export const websiteName = '公众号文章导出';
 
@@ -406,6 +406,33 @@ export const apis = [
       },
     ],
     responseSample: {},
+    remark: '此接口不需要 API 密钥',
+  },
+  {
+    name: '查询公众号主体信息 (beta)',
+    description: '根据公众号的 biz 查询主体信息',
+    url: '/api/public/beta/authorinfo',
+    method: 'GET',
+    params: [
+      {
+        label: '公众号id',
+        name: 'biz',
+        location: 'query',
+        required: true,
+        default: 'N/A',
+        type: 'String',
+        remark: '',
+      },
+    ],
+    responseSample: {
+      base_resp: {
+        exportkey_token: '',
+        ret: 0,
+      },
+      identity_name: '专心保险经纪有限公司',
+      is_verify: 2,
+      original_article_count: 3585,
+    },
     remark: '此接口不需要 API 密钥',
   },
 ];

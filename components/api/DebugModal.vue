@@ -2,15 +2,11 @@
 import { apis } from '~/config';
 import type { FormError } from '#ui/types';
 import CodeSegment from '~/components/api/CodeSegment.vue';
-import type { Preferences } from '~/types/preferences';
-import usePreferences from '~/composables/usePreferences';
 
 interface Props {
   initialSelected: string;
 }
 const props = defineProps<Props>();
-
-const preferences: Ref<Preferences> = usePreferences() as unknown as Ref<Preferences>;
 
 const isOpen = ref(false);
 const selectedApi = ref(apis[0]);
@@ -71,16 +67,10 @@ function submit() {
     url += '?' + new URLSearchParams(params).toString();
   }
 
-  const headers: Record<string, string> = {};
-  if (preferences.value.api_auth) {
-    headers['Authorization'] = preferences.value.api_auth.token;
-  }
-
   btnLoading.value = true;
   resp.value = null;
   fetch(url, {
     method: selectedApi.value.method,
-    headers: headers,
   })
     .then(resp => {
       if (resp.headers.get('content-type') === 'application/json') {

@@ -17,7 +17,7 @@ import GridStatusBar from '~/components/grid/StatusBar.vue';
 import GridCoverTooltip from '~/components/grid/CoverTooltip.vue';
 import { AG_GRID_LOCALE_CN } from '@ag-grid-community/locale';
 import { type Info } from '~/store/v2/info';
-import { getArticleCache, articleDeleted } from '~/store/v2/article';
+import { getArticleCache, articleDeleted, getArticleByLink } from '~/store/v2/article';
 import type { AppMsgEx } from '~/types/types';
 import { formatElapsedTime, formatTimeStamp, sleep, ITEM_SHOW_TYPE, durationToSeconds } from '~/utils';
 import { Downloader } from '~/utils/download/Downloader';
@@ -27,9 +27,9 @@ import { getCommentCache } from '~/store/v2/comment';
 import type { ArticleMetadata, DownloaderStatus, ExporterStatus } from '~/utils/download/types';
 import { getMetadataCache, type Metadata } from '~/store/v2/metadata';
 import type { PreviewArticle } from '#components';
-import TurndownService from 'turndown';
 import type { Preferences } from '~/types/preferences';
 import AccountSelectorForArticle from '~/components/selector/AccountSelectorForArticle.vue';
+import { isDev } from '~/config';
 
 let globalRowData: Article[] = [];
 
@@ -386,7 +386,6 @@ function onFilterChanged(event: FilterChangedEvent) {
   event.api.deselectAll();
 }
 
-const isDev = !import.meta.env.PROD;
 const preferences = usePreferences();
 const hideDeleted = computed(() => (preferences.value as unknown as Preferences).hideDeleted);
 
@@ -962,9 +961,8 @@ async function export2word() {
 }
 
 async function debug() {
-  const turndownService = new TurndownService();
-  const markdown = turndownService.turndown('<h1>Hello world!</h1>');
-  console.debug(markdown);
+  const article = await getArticleByLink('https://mp.weixin.qq.com/s/8sCrH6AZyyff5dVXQAzVFQ');
+  console.log(article);
 }
 </script>
 

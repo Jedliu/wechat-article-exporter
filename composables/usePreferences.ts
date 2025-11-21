@@ -16,7 +16,6 @@ const defaultOptions: Partial<Preferences> = {
     forceDownloadContent: false,
   },
   accountSyncSeconds: 5,
-  api_auth: null,
   syncDateRange: 'all',
 };
 
