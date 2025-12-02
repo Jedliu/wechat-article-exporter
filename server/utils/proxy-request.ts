@@ -45,7 +45,7 @@ export async function proxyMpRequest(options: RequestOptions) {
 
   // 记录请求报文
   const requestId = uuidv4().replace(/-/g, '');
-  if (runtimeConfig.debugMpRequest && isDev) {
+  if (process.env.NUXT_DEBUG_MP_REQUEST && isDev) {
     await logRequest(requestId, request.clone());
   }
 
@@ -53,7 +53,7 @@ export async function proxyMpRequest(options: RequestOptions) {
   const mpResponse = await fetch(request);
 
   // 记录响应报文
-  if (runtimeConfig.debugMpRequest && isDev) {
+  if (process.env.NUXT_DEBUG_MP_REQUEST && isDev) {
     await logResponse(requestId, mpResponse.clone());
   }
 

@@ -48,12 +48,26 @@ export default defineEventHandler(async event => {
 
   switch (format) {
     case 'html':
-      return normalizeHtml(rawHtml, 'html');
+      return new Response(normalizeHtml(rawHtml, 'html'), {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/html; charset=UTF-8',
+        },
+      });
     case 'text':
-      return normalizeHtml(rawHtml, 'text');
+      return new Response(normalizeHtml(rawHtml, 'text'), {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/plain; charset=UTF-8',
+        },
+      });
     case 'markdown':
-      const turndownService = new TurndownService();
-      return turndownService.turndown(normalizeHtml(rawHtml, 'html'));
+      return new Response(new TurndownService().turndown(normalizeHtml(rawHtml, 'html')), {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/markdown; charset=UTF-8',
+        },
+      });
     default:
       throw new Error(`Unknown format ${format}`);
   }

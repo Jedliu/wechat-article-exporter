@@ -16,26 +16,26 @@
 
 交流群(QQ): `991482155`
 
-## 重要告知：项目域名调整
-后续项目域名调整如下：
+## :bell: 重要告知：项目域名调整
+项目域名调整如下：
 
 |     | 下载站                            | 文档站                        |
 |-----|--------------------------------|----------------------------|
-| 调整前 | https://exporter.wxdown.online | https://docs.wxdown.online |
 | 调整后 | https://down.mptext.top        | https://docs.mptext.top    |
+| 调整前 | https://exporter.wxdown.online | https://docs.wxdown.online |
 
 具体细节可以查看 [这里](https://docs.mptext.top/misc/domain.html)。
 
 
-## 文档
+## :books: 如何使用？
 
-[文档站点](https://docs.mptext.top) 上线啦 🎉🎉🎉，后续使用教程会在此站点统一进行维护。
+该工具的使用教程已移至 [文档站点](https://docs.mptext.top)。
 
 
 ## :dart: 特性
 
 - [x] 搜索公众号，支持关键字搜索
-- [x] 支持导出 html/json/excel/txt 格式(html 格式打包了图片和样式文件，能够保证100%还原文章样式)
+- [x] 支持导出 html/json/excel/txt/md/docx 格式(html 格式打包了图片和样式文件，能够保证100%还原文章样式)
 - [x] 缓存文章列表数据，减少接口请求次数
 - [x] 支持文章过滤，包括作者、标题、发布时间、原创标识、所属合集等
 - [x] 支持合集下载
@@ -67,7 +67,7 @@
 
 MIT
 
-## 声明
+## :accessibility: 声明
 
 本程序承诺，不会利用您扫码登录的公众号进行任何形式的私有爬虫，也就是说不存在把你的账号作为公共账号为别人爬取文章的行为，也不存在类似账号池的东西。
 
