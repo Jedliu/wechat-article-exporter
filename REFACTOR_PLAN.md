@@ -57,7 +57,7 @@
 前端层:
 ├─ Nuxt 3 (Vue 3 + SSR disabled)
 ├─ Nuxt UI + Tailwind CSS
-├─ AG Grid Enterprise
+├─ shadcn/ui (Radix UI + Tailwind CSS)
 └─ Dexie.js (IndexedDB 包装器)
 
 服务端层:
@@ -169,8 +169,8 @@ Exporter类:
 │  │  ├─ React Router (路由)                                   │  │
 │  │  ├─ Zustand (状态管理)                                     │  │
 │  │  ├─ TanStack Query (数据获取)                             │  │
-│  │  ├─ Ant Design (UI组件库)                                 │  │
-│  │  ├─ AG Grid React (表格)                                  │  │
+│  │  ├─ shadcn/ui (UI组件库)                                  │  │
+│  │  ├─ TanStack Table (表格)                                 │  │
 │  │  └─ Socket.io Client (实时通信)                           │  │
 │  └──────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
@@ -335,8 +335,8 @@ wechat-article-exporter/
 | **状态管理** | Zustand | 轻量级，API简洁，TypeScript友好 |
 | **数据获取** | TanStack Query | 智能缓存，自动重试，状态管理 |
 | **路由** | React Router v6 | 官方推荐，功能完善 |
-| **UI库** | Ant Design | 企业级组件库，文档完善 |
-| **表格** | AG Grid React | 已有使用经验，功能强大 |
+| **UI库** | shadcn/ui | 现代化设计，完全可定制，基于 Radix UI + Tailwind |
+| **表格** | TanStack Table | 无头组件，完全可定制，性能优秀 |
 | **样式** | Tailwind CSS + CSS Modules | 实用优先，组件隔离 |
 | **实时通信** | Socket.io Client | 下载进度实时推送 |
 | **表单** | React Hook Form + Zod | 性能优秀，类型安全 |
@@ -465,9 +465,20 @@ packages:
     "react-router-dom": "^6.20.0",
     "zustand": "^4.4.7",
     "@tanstack/react-query": "^5.14.0",
-    "antd": "^5.12.0",
-    "ag-grid-react": "^31.0.0",
-    "ag-grid-enterprise": "^31.0.0",
+    "@tanstack/react-table": "^8.11.0",
+    "@radix-ui/react-dialog": "^1.0.5",
+    "@radix-ui/react-dropdown-menu": "^2.0.6",
+    "@radix-ui/react-select": "^2.0.0",
+    "@radix-ui/react-tabs": "^1.0.4",
+    "@radix-ui/react-tooltip": "^1.0.7",
+    "@radix-ui/react-popover": "^1.0.7",
+    "@radix-ui/react-checkbox": "^1.0.4",
+    "@radix-ui/react-switch": "^1.0.3",
+    "@radix-ui/react-progress": "^1.0.3",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.1.0",
+    "tailwind-merge": "^2.2.0",
+    "lucide-react": "^0.303.0",
     "axios": "^1.6.2",
     "socket.io-client": "^4.6.0",
     "react-hook-form": "^7.49.0",
@@ -475,6 +486,7 @@ packages:
     "@hookform/resolvers": "^3.3.3",
     "date-fns": "^3.0.0",
     "qrcode.react": "^3.1.0",
+    "react-dropzone": "^14.2.3",
     "file-saver": "^2.0.5",
     "jszip": "^3.10.1"
   },
@@ -1754,7 +1766,7 @@ src/
 │   │   ├── AccountSearch/
 │   │   └── AccountList/
 │   ├── article/             # 文章相关组件
-│   │   ├── ArticleGrid/     # AG Grid 封装
+│   │   ├── ArticleTable/    # TanStack Table 封装
 │   │   ├── ArticleCard/
 │   │   ├── ArticlePreview/
 │   │   └── ArticleFilter/
@@ -2169,7 +2181,7 @@ async function importMigrationData(filePath: string) {
 - [ ] 搭建 React + Vite 项目
 - [ ] 配置路由（React Router）
 - [ ] 配置状态管理（Zustand）
-- [ ] 配置 UI 库（Ant Design）
+- [ ] 配置 UI 库（shadcn/ui）
 - [ ] 实现布局组件
 - [ ] 实现登录/注册页面
 
@@ -2194,7 +2206,7 @@ async function importMigrationData(filePath: string) {
 - [ ] 后端：实现文章列表 API
 - [ ] 后端：实现文章搜索/过滤
 - [ ] 后端：实现分页
-- [ ] 前端：实现 AG Grid 表格
+- [ ] 前端：实现 TanStack Table 表格
 - [ ] 前端：实现文章过滤器
 - [ ] 前端：实现批量选择
 
@@ -2474,7 +2486,8 @@ pnpm --filter api docs:generate
 - [React 官方文档](https://react.dev/)
 - [Turborepo 文档](https://turbo.build/repo/docs)
 - [pnpm 文档](https://pnpm.io/)
-- [AG Grid React 文档](https://www.ag-grid.com/react-data-grid/)
+- [shadcn/ui 文档](https://ui.shadcn.com/)
+- [TanStack Table 文档](https://tanstack.com/table/latest)
 - [TanStack Query 文档](https://tanstack.com/query/latest)
 - [Zustand 文档](https://docs.pmnd.rs/zustand/getting-started/introduction)
 
@@ -3524,7 +3537,15 @@ export class ProxyController {
 ```typescript
 // apps/web/src/pages/ProxyStatus.tsx
 import { useQuery } from '@tanstack/react-query';
-import { Table, Tag, Progress } from 'antd';
+import {
+  useReactTable,
+  getCoreRowModel,
+  flexRender,
+  createColumnHelper,
+} from '@tanstack/react-table';
+import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { proxyService } from '@/services/proxy.service';
 
 interface ProxyStatus {
@@ -3537,6 +3558,8 @@ interface ProxyStatus {
   availability: string;
 }
 
+const columnHelper = createColumnHelper<ProxyStatus>();
+
 export function ProxyStatusPage() {
   const { data, isLoading } = useQuery({
     queryKey: ['proxy-status'],
@@ -3545,48 +3568,81 @@ export function ProxyStatusPage() {
   });
 
   const columns = [
-    {
-      title: '代理地址',
-      dataIndex: 'proxy',
-      key: 'proxy',
-    },
-    {
-      title: '状态',
-      dataIndex: 'availability',
-      key: 'availability',
-      render: (text: string, record: ProxyStatus) => (
-        <Tag color={record.cooldown ? 'red' : 'green'}>{text}</Tag>
+    columnHelper.accessor('proxy', {
+      header: '代理地址',
+      cell: (info) => info.getValue(),
+    }),
+    columnHelper.accessor('availability', {
+      header: '状态',
+      cell: (info) => (
+        <Badge variant={info.row.original.cooldown ? 'destructive' : 'success'}>
+          {info.getValue()}
+        </Badge>
       ),
-    },
-    {
-      title: '成功率',
-      key: 'successRate',
-      render: (_: any, record: ProxyStatus) => {
+    }),
+    columnHelper.display({
+      id: 'successRate',
+      header: '成功率',
+      cell: (info) => {
+        const record = info.row.original;
         const rate = record.totalUse > 0
           ? (record.totalSuccess / record.totalUse) * 100
           : 0;
-        return <Progress percent={Math.round(rate)} size="small" />;
+        return (
+          <div className="flex items-center gap-2">
+            <Progress value={rate} className="w-20" />
+            <span className="text-sm text-muted-foreground">{Math.round(rate)}%</span>
+          </div>
+        );
       },
-    },
-    {
-      title: '连续失败',
-      dataIndex: 'failures',
-      key: 'failures',
-    },
-    {
-      title: '总使用次数',
-      dataIndex: 'totalUse',
-      key: 'totalUse',
-    },
+    }),
+    columnHelper.accessor('failures', {
+      header: '连续失败',
+      cell: (info) => info.getValue(),
+    }),
+    columnHelper.accessor('totalUse', {
+      header: '总使用次数',
+      cell: (info) => info.getValue(),
+    }),
   ];
 
+  const table = useReactTable({
+    data: data?.data ?? [],
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+  });
+
+  if (isLoading) {
+    return <div className="flex items-center justify-center p-8">加载中...</div>;
+  }
+
   return (
-    <Table
-      dataSource={data?.data}
-      columns={columns}
-      loading={isLoading}
-      rowKey="proxy"
-    />
+    <div className="rounded-md border">
+      <Table>
+        <TableHeader>
+          {table.getHeaderGroups().map((headerGroup) => (
+            <TableRow key={headerGroup.id}>
+              {headerGroup.headers.map((header) => (
+                <TableHead key={header.id}>
+                  {flexRender(header.column.columnDef.header, header.getContext())}
+                </TableHead>
+              ))}
+            </TableRow>
+          ))}
+        </TableHeader>
+        <TableBody>
+          {table.getRowModel().rows.map((row) => (
+            <TableRow key={row.id}>
+              {row.getVisibleCells().map((cell) => (
+                <TableCell key={cell.id}>
+                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                </TableCell>
+              ))}
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
   );
 }
 ```
