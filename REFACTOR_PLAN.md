@@ -2616,3 +2616,650 @@ Bundle 大小（简单登录表单）：
 - [nestjs-zod GitHub](https://github.com/risen228/nestjs-zod)
 - [Valibot 官方文档](https://valibot.dev/)
 - [Valibot vs Zod Performance Comparison](https://github.com/fabian-hiller/valibot)
+
+### F. 代理管理技术详解
+
+**背景**: 2026-01-18
+**目的**: 避免同一 IP 抓取资源时被屏蔽或限流
+
+---
+
+#### F.1 问题背景
+
+在下载微信公众号文章的资源（图片、CSS、JS 等）时，会遇到以下问题：
+
+1. **Referrer 限制**: 微信资源服务器检查 HTTP Referrer，直接访问会被拒绝
+2. **IP 限流**: 同一 IP 短时间内大量请求会被临时封禁
+3. **频率控制**: 高频请求触发反爬虫机制
+4. **跨域限制**: 浏览器 CORS 策略阻止直接下载
+
+为了解决这些问题，项目采用了**公共代理池 + 智能轮转**的方案。
+
+#### F.2 现有架构分析
+
+**代理配置** (`config/index.ts:78-112`):
+
+```typescript
+export const PUBLIC_PROXY_LIST: string[] = [
+  // worker-proxy.asia 域名（16个节点）
+  'https://00.worker-proxy.asia',
+  'https://01.worker-proxy.asia',
+  // ... 共16个
+
+  // net-proxy.asia 域名（16个节点）
+  'https://00.net-proxy.asia',
+  'https://01.net-proxy.asia',
+  // ... 共16个
+];
+
+// 注释中还列出了48个备用代理节点：
+// - workers-proxy.shop (16个)
+// - workers-proxy.top (16个)
+// - workers-proxy.ggff.net (16个)
+```
+
+**ProxyManager 核心实现** (`utils/download/ProxyManager.ts`):
+
+```typescript
+export class ProxyManager {
+  private readonly proxies: string[];                    // 代理列表
+  private readonly proxyStatus: Map<string, ProxyStatus>; // 代理状态
+  private readonly cooldownPeriod: number;               // 冷却期（ms）
+  private readonly maxFailures: number;                  // 最大失败次数
+
+  constructor(
+    proxies: string[],
+    cooldownPeriod = DEFAULT_OPTIONS.COOLDOWN_PERIOD,  // 默认值
+    maxFailures = DEFAULT_OPTIONS.MAX_FAILURES          // 默认值
+  ) {
+    this.proxies = [...proxies];
+    this.proxyStatus = new Map();
+    this.cooldownPeriod = cooldownPeriod;
+    this.maxFailures = maxFailures;
+    this.initProxyStatus();
+  }
+
+  // 智能代理选择算法
+  public getBestProxy(): string {
+    const now = Date.now();
+    const availableProxies = Array.from(this.proxyStatus.entries())
+      .filter(([_, status]) =>
+        !status.cooldown || now - status.lastUsed >= this.cooldownPeriod
+      )
+      .sort((a, b) => {
+        // 优先级1: 失败次数少的优先
+        if (a[1].failures !== b[1].failures) {
+          return a[1].failures - b[1].failures;
+        }
+        // 优先级2: 最久未使用的优先
+        return a[1].lastUsed - b[1].lastUsed;
+      });
+
+    if (availableProxies.length === 0) {
+      return this.resetAndGetProxy(); // 强制重置
+    }
+
+    const [bestProxy, status] = availableProxies[0];
+    status.lastUsed = now;
+    status.totalUse++;
+    return bestProxy;
+  }
+
+  // 记录代理失败
+  public recordFailure(proxy: string): void {
+    const status = this.proxyStatus.get(proxy);
+    if (!status) return;
+
+    status.failures++;
+    status.totalFailures++;
+
+    // 连续失败达到阈值，进入冷却期
+    status.cooldown = status.failures >= this.maxFailures;
+  }
+
+  // 记录代理成功
+  public recordSuccess(proxy: string): void {
+    const status = this.proxyStatus.get(proxy);
+    if (!status) return;
+
+    status.failures = 0;      // 清零失败计数
+    status.cooldown = false;  // 解除冷却
+    status.totalSuccess++;
+  }
+}
+```
+
+**ProxyStatus 接口**:
+
+```typescript
+interface ProxyStatus {
+  failures: number;       // 连续失败次数
+  lastUsed: number;      // 最后使用时间戳（ms）
+  cooldown: boolean;     // 是否在冷却期
+  totalFailures: number; // 总失败次数（统计）
+  totalSuccess: number;  // 总成功次数（统计）
+  totalUse: number;      // 总使用次数（统计）
+}
+```
+
+#### F.3 使用场景
+
+**在 Exporter 中的应用** (`utils/download/Exporter.ts:184-217`):
+
+```typescript
+private async downloadResourceTask(url: string, fakeid: string): Promise<void> {
+  this.pending.add(url);
+
+  // 检查缓存
+  const cached = await getResourceCache(url);
+  if (cached) {
+    this.pending.delete(url);
+    this.completed.add(url);
+    return;
+  }
+
+  // 重试循环
+  for (let attempt = 0; attempt < this.options.maxRetries; attempt++) {
+    const proxy = this.proxyManager.getBestProxy(); // 获取最佳代理
+
+    try {
+      const blob = await this.download(fakeid, url, proxy);
+      await updateResourceCache({
+        fakeid: fakeid,
+        url: url,
+        file: blob,
+      });
+      this.pending.delete(url);
+      this.completed.add(url);
+      this.proxyManager.recordSuccess(proxy); // 记录成功
+      return;
+    } catch (error) {
+      await this.handleDownloadFailure(proxy, url, attempt, error);
+      // handleDownloadFailure 内部会调用 proxyManager.recordFailure()
+    }
+  }
+
+  this.pending.delete(url);
+  this.failed.add(url);
+}
+```
+
+**工作流程**:
+
+1. **资源提取**: 从 HTML 中提取所有需要下载的资源 URL（图片、CSS）
+2. **并发下载**: 使用队列管理并发下载任务
+3. **代理选择**: 每次下载前调用 `getBestProxy()` 获取最优代理
+4. **失败重试**: 下载失败时，记录代理失败次数，重试时会自动选择其他代理
+5. **成功反馈**: 下载成功时，清零该代理的失败计数
+
+#### F.4 智能选择算法详解
+
+**算法流程**:
+
+```
+┌─────────────────────────────────────────────┐
+│  1. 过滤可用代理                             │
+│     - 未在冷却期的代理                       │
+│     - 或冷却期已过的代理                     │
+└─────────────────┬───────────────────────────┘
+                  │
+                  ▼
+┌─────────────────────────────────────────────┐
+│  2. 排序（双重优先级）                       │
+│     优先级1: failures（升序）                │
+│     优先级2: lastUsed（升序）               │
+└─────────────────┬───────────────────────────┘
+                  │
+                  ▼
+┌─────────────────────────────────────────────┐
+│  3. 选择结果                                 │
+│     - 有可用代理: 返回排序后的第一个         │
+│     - 无可用代理: 强制重置最久未用的代理     │
+└─────────────────────────────────────────────┘
+```
+
+**关键设计原则**:
+
+1. **负载均衡**: 优先使用最久未用的代理，避免单点过载
+2. **故障隔离**: 失败代理进入冷却期，避免持续失败
+3. **自动恢复**: 冷却期过后自动重新加入可用池
+4. **强制保底**: 所有代理都不可用时，强制重置最旧代理，确保服务不中断
+
+**示例场景**:
+
+```
+初始状态:
+Proxy A: failures=0, lastUsed=1000, cooldown=false
+Proxy B: failures=0, lastUsed=2000, cooldown=false
+Proxy C: failures=0, lastUsed=3000, cooldown=false
+
+第1次调用 getBestProxy():
+  → 选择 Proxy A (failures=0, lastUsed 最小)
+  → 更新: lastUsed=4000, totalUse=1
+
+Proxy A 连续失败 3 次:
+  → failures=3, cooldown=true
+
+第2次调用 getBestProxy():
+  → Proxy A 被过滤（在冷却期）
+  → 选择 Proxy B (failures=0, lastUsed=2000)
+
+Proxy A 成功恢复:
+  → recordSuccess() 调用
+  → failures=0, cooldown=false
+  → 重新进入可用池
+```
+
+#### F.5 新架构实现方案
+
+在重构后的 NestJS + React 架构中，代理管理需要迁移到后端。
+
+##### F.5.1 后端实现
+
+**模块结构**:
+
+```typescript
+// apps/api/src/modules/proxy/proxy.module.ts
+import { Module } from '@nestjs/common';
+import { ProxyService } from './proxy.service';
+import { ProxyController } from './proxy.controller';
+
+@Module({
+  providers: [ProxyService],
+  controllers: [ProxyController],
+  exports: [ProxyService]
+})
+export class ProxyModule {}
+```
+
+**服务实现**:
+
+```typescript
+// apps/api/src/modules/proxy/proxy.service.ts
+import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+
+interface ProxyStatus {
+  failures: number;
+  lastUsed: number;
+  cooldown: boolean;
+  totalFailures: number;
+  totalSuccess: number;
+  totalUse: number;
+}
+
+@Injectable()
+export class ProxyService {
+  private readonly proxies: string[];
+  private readonly proxyStatus: Map<string, ProxyStatus>;
+  private readonly cooldownPeriod: number;
+  private readonly maxFailures: number;
+
+  constructor(private configService: ConfigService) {
+    // 从配置中加载代理列表
+    this.proxies = this.configService.get<string[]>('proxy.list', []);
+    this.cooldownPeriod = this.configService.get<number>('proxy.cooldownPeriod', 60000);
+    this.maxFailures = this.configService.get<number>('proxy.maxFailures', 3);
+
+    this.proxyStatus = new Map();
+    this.initProxyStatus();
+  }
+
+  private initProxyStatus(): void {
+    this.proxies.forEach(proxy => {
+      this.proxyStatus.set(proxy, {
+        failures: 0,
+        lastUsed: 0,
+        cooldown: false,
+        totalFailures: 0,
+        totalSuccess: 0,
+        totalUse: 0,
+      });
+    });
+  }
+
+  public getBestProxy(): string {
+    const now = Date.now();
+    const availableProxies = Array.from(this.proxyStatus.entries())
+      .filter(([_, status]) =>
+        !status.cooldown || now - status.lastUsed >= this.cooldownPeriod
+      )
+      .sort((a, b) => {
+        if (a[1].failures !== b[1].failures) {
+          return a[1].failures - b[1].failures;
+        }
+        return a[1].lastUsed - b[1].lastUsed;
+      });
+
+    if (availableProxies.length === 0) {
+      return this.resetAndGetProxy();
+    }
+
+    const [bestProxy, status] = availableProxies[0];
+    status.lastUsed = now;
+    status.totalUse++;
+    return bestProxy;
+  }
+
+  public recordFailure(proxy: string): void {
+    const status = this.proxyStatus.get(proxy);
+    if (!status) return;
+
+    status.failures++;
+    status.totalFailures++;
+    status.cooldown = status.failures >= this.maxFailures;
+  }
+
+  public recordSuccess(proxy: string): void {
+    const status = this.proxyStatus.get(proxy);
+    if (!status) return;
+
+    status.failures = 0;
+    status.cooldown = false;
+    status.totalSuccess++;
+  }
+
+  public getProxyStatus(): Map<string, ProxyStatus> {
+    return new Map(this.proxyStatus);
+  }
+
+  private resetAndGetProxy(): string {
+    const [oldestProxy, status] = Array.from(this.proxyStatus.entries())
+      .sort(([, a], [, b]) => a.lastUsed - b.lastUsed)[0];
+
+    this.proxyStatus.set(oldestProxy, {
+      ...status,
+      failures: 0,
+      cooldown: false,
+      lastUsed: Date.now(),
+      totalUse: status.totalUse + 1,
+    });
+
+    return oldestProxy;
+  }
+}
+```
+
+**配置管理**:
+
+```typescript
+// apps/api/src/config/proxy.config.ts
+import { registerAs } from '@nestjs/config';
+
+export default registerAs('proxy', () => ({
+  list: process.env.PROXY_LIST?.split(',') || [
+    'https://00.worker-proxy.asia',
+    'https://01.worker-proxy.asia',
+    // ... 其他代理
+  ],
+  cooldownPeriod: parseInt(process.env.PROXY_COOLDOWN_PERIOD || '60000', 10),
+  maxFailures: parseInt(process.env.PROXY_MAX_FAILURES || '3', 10),
+}));
+```
+
+**环境变量** (`.env`):
+
+```bash
+# 代理配置
+PROXY_LIST=https://00.worker-proxy.asia,https://01.worker-proxy.asia,...
+PROXY_COOLDOWN_PERIOD=60000  # 冷却期（毫秒）
+PROXY_MAX_FAILURES=3         # 最大失败次数
+```
+
+##### F.5.2 与下载模块集成
+
+```typescript
+// apps/api/src/modules/download/download.processor.ts
+import { Processor, Process } from '@nestjs/bullmq';
+import { Job } from 'bullmq';
+import { ProxyService } from '../proxy/proxy.service';
+import { HttpService } from '@nestjs/axios';
+import { firstValueFrom } from 'rxjs';
+
+@Processor('download')
+export class DownloadProcessor {
+  constructor(
+    private proxyService: ProxyService,
+    private httpService: HttpService
+  ) {}
+
+  @Process('resource')
+  async handleResourceDownload(job: Job) {
+    const { url, maxRetries = 3 } = job.data;
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      const proxy = this.proxyService.getBestProxy();
+
+      try {
+        // 通过代理下载资源
+        const response = await firstValueFrom(
+          this.httpService.get(`${proxy}/${url}`, {
+            responseType: 'arraybuffer',
+            timeout: 30000,
+          })
+        );
+
+        this.proxyService.recordSuccess(proxy);
+
+        return {
+          url,
+          data: Buffer.from(response.data),
+          contentType: response.headers['content-type'],
+        };
+      } catch (error) {
+        this.proxyService.recordFailure(proxy);
+
+        if (attempt === maxRetries - 1) {
+          throw error;
+        }
+      }
+    }
+  }
+}
+```
+
+##### F.5.3 监控与管理 API
+
+```typescript
+// apps/api/src/modules/proxy/proxy.controller.ts
+import { Controller, Get, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
+import { ProxyService } from './proxy.service';
+
+@ApiTags('proxy')
+@Controller('proxy')
+@UseGuards(JwtAuthGuard)
+@ApiBearerAuth()
+export class ProxyController {
+  constructor(private readonly proxyService: ProxyService) {}
+
+  @Get('status')
+  @ApiOperation({ summary: '获取代理状态' })
+  async getProxyStatus() {
+    const statusMap = this.proxyService.getProxyStatus();
+    return {
+      success: true,
+      data: Array.from(statusMap.entries()).map(([proxy, status]) => ({
+        proxy,
+        ...status,
+        availability: !status.cooldown ? '可用' : '冷却中',
+      })),
+    };
+  }
+}
+```
+
+**API 响应示例**:
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "proxy": "https://00.worker-proxy.asia",
+      "failures": 0,
+      "lastUsed": 1705567200000,
+      "cooldown": false,
+      "totalFailures": 5,
+      "totalSuccess": 245,
+      "totalUse": 250,
+      "availability": "可用"
+    },
+    {
+      "proxy": "https://01.worker-proxy.asia",
+      "failures": 3,
+      "lastUsed": 1705567180000,
+      "cooldown": true,
+      "totalFailures": 12,
+      "totalSuccess": 188,
+      "totalUse": 200,
+      "availability": "冷却中"
+    }
+  ]
+}
+```
+
+#### F.6 前端监控界面（可选）
+
+**代理状态展示组件**:
+
+```typescript
+// apps/web/src/pages/ProxyStatus.tsx
+import { useQuery } from '@tanstack/react-query';
+import { Table, Tag, Progress } from 'antd';
+import { proxyService } from '@/services/proxy.service';
+
+interface ProxyStatus {
+  proxy: string;
+  failures: number;
+  cooldown: boolean;
+  totalSuccess: number;
+  totalFailures: number;
+  totalUse: number;
+  availability: string;
+}
+
+export function ProxyStatusPage() {
+  const { data, isLoading } = useQuery({
+    queryKey: ['proxy-status'],
+    queryFn: () => proxyService.getStatus(),
+    refetchInterval: 5000, // 每5秒刷新
+  });
+
+  const columns = [
+    {
+      title: '代理地址',
+      dataIndex: 'proxy',
+      key: 'proxy',
+    },
+    {
+      title: '状态',
+      dataIndex: 'availability',
+      key: 'availability',
+      render: (text: string, record: ProxyStatus) => (
+        <Tag color={record.cooldown ? 'red' : 'green'}>{text}</Tag>
+      ),
+    },
+    {
+      title: '成功率',
+      key: 'successRate',
+      render: (_: any, record: ProxyStatus) => {
+        const rate = record.totalUse > 0
+          ? (record.totalSuccess / record.totalUse) * 100
+          : 0;
+        return <Progress percent={Math.round(rate)} size="small" />;
+      },
+    },
+    {
+      title: '连续失败',
+      dataIndex: 'failures',
+      key: 'failures',
+    },
+    {
+      title: '总使用次数',
+      dataIndex: 'totalUse',
+      key: 'totalUse',
+    },
+  ];
+
+  return (
+    <Table
+      dataSource={data?.data}
+      columns={columns}
+      loading={isLoading}
+      rowKey="proxy"
+    />
+  );
+}
+```
+
+#### F.7 优化建议
+
+**性能优化**:
+
+1. **Redis 缓存代理状态**: 在集群环境下，使用 Redis 共享代理状态
+   ```typescript
+   // 伪代码
+   async getBestProxy() {
+     const cachedStatus = await this.redis.get('proxy:status');
+     // ...
+   }
+   ```
+
+2. **动态代理池**: 定期检测代理可用性，自动添加/移除代理
+   ```typescript
+   @Cron('0 */10 * * * *') // 每10分钟
+   async healthCheck() {
+     for (const proxy of this.proxies) {
+       const isAlive = await this.pingProxy(proxy);
+       // 更新状态
+     }
+   }
+   ```
+
+3. **分级代理**: 根据速度和稳定性将代理分为优先级
+   ```typescript
+   const proxies = [
+     { url: '...', priority: 'high' },
+     { url: '...', priority: 'low' },
+   ];
+   ```
+
+**监控告警**:
+
+1. **可用率告警**: 可用代理数量低于阈值时发送告警
+2. **失败率告警**: 全局失败率超过阈值时通知管理员
+3. **性能监控**: 记录每个代理的平均响应时间
+
+#### F.8 总结
+
+**核心优势**:
+
+1. ✅ **智能轮转**: 自动选择最优代理，负载均衡
+2. ✅ **故障隔离**: 失败代理自动进入冷却期，避免持续失败
+3. ✅ **自动恢复**: 冷却期过后自动重新启用
+4. ✅ **统计分析**: 记录每个代理的成功率和使用情况
+5. ✅ **无单点故障**: 即使所有代理暂时不可用，也会强制重置保底
+
+**重构后的改进**:
+
+1. 🚀 **集中管理**: 代理管理统一在后端，便于监控和维护
+2. 🚀 **集群支持**: 使用 Redis 可在多实例间共享代理状态
+3. 🚀 **可视化监控**: 提供代理状态实时监控界面
+4. 🚀 **动态配置**: 支持运行时添加/移除代理，无需重启
+5. 🚀 **性能优化**: 后端代理池复用，减少代理选择开销
+
+**实施优先级**:
+
+- **Phase 1** (MVP): 基础 ProxyService + 代理配置
+- **Phase 2**: 与下载模块集成 + 失败重试
+- **Phase 3**: 监控 API + 前端状态展示
+- **Phase 4**: Redis 集群共享 + 动态代理池
+
+---
+
+**相关文件参考**:
+- `config/index.ts:78-112` - 代理列表配置
+- `utils/download/ProxyManager.ts:1-105` - 代理管理器实现
+- `utils/download/Exporter.ts:184-217` - 代理使用示例
