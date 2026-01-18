@@ -2076,3 +2076,188 @@ pnpm --filter api docs:generate
 - [Turborepo 文档](https://turbo.build/repo/docs)
 - [pnpm 文档](https://pnpm.io/)
 - [AG Grid React 文档](https://www.ag-grid.com/react-data-grid/)
+- [TanStack Query 文档](https://tanstack.com/query/latest)
+- [Zustand 文档](https://docs.pmnd.rs/zustand/getting-started/introduction)
+
+### D. 技术选型评估：Alova.js vs TanStack Query
+
+**评估日期**: 2026-01-18
+**评估人**: 架构设计团队
+**结论**: ❌ 不推荐使用 Alova.js，保持 TanStack Query + Axios 方案
+
+---
+
+#### D.1 背景
+
+在重构方案制定过程中，团队评估了 [Alova.js](https://alova.js.org/zh-CN/) 作为请求管理工具的可行性。Alova.js 是一个轻量级的请求场景管理库（RSM - Request Scene Management），主打简洁的 API 和自动状态管理。
+
+#### D.2 Alova.js 核心特性
+
+根据官方文档和社区反馈，Alova.js 具有以下特点：
+
+**优势**:
+1. **极轻量**: 仅 4KB+，是 axios 的 30%
+2. **跨框架支持**: Vue、React、Svelte、Uniapp、Taro
+3. **自动状态管理**: 响应数据自动状态化，无需手动管理
+4. **智能缓存**: 提供内存模式、缓存占位模式、恢复模式
+5. **请求共享**: 自动合并相同请求
+6. **内置请求重试**: 可配置重试次数和间隔
+7. **丰富的请求策略**: usePagination、useWatcher、useSerialRequest 等
+8. **多请求适配器**: 支持 Axios、Fetch、XMLHttpRequest
+
+**示例代码**:
+```typescript
+// 简洁的 API
+const { data, loading, error } = useRequest(alova.Get('/api/articles'));
+
+// 防抖搜索
+const { data } = useWatcher(
+  () => alova.Get('/search', { params: { keyword } }),
+  [keyword],
+  { debounce: 300 }
+);
+
+// 分页
+const { data, page, pageSize, onNext, onPrev } = usePagination(
+  (page, size) => alova.Get('/articles', { params: { page, size } })
+);
+```
+
+#### D.3 对比分析：Alova.js vs TanStack Query + Axios
+
+| 维度 | Alova.js | TanStack Query + Axios | 评分 |
+|------|----------|------------------------|------|
+| **体积** | 4KB | 24KB | Alova ✅ |
+| **学习曲线** | 中等（新概念 RSM） | 低（主流技术） | TQ ✅ |
+| **社区生态** | ~3K stars（新） | ~39K stars（成熟） | TQ ✅ |
+| **文档** | 中文为主 | 英文完善，国际化 | TQ ✅ |
+| **API 简洁性** | 非常简洁 | 需要配置 | Alova ✅ |
+| **TypeScript** | ✅ 原生支持 | ✅ 原生支持 | 平局 |
+| **缓存策略** | 3种模式 | 强大灵活 | TQ ✅ |
+| **React 18 支持** | 未知 | ✅ 完美支持并发 | TQ ✅ |
+| **生产验证** | ⚠️ 较少 | ✅ 大量企业使用 | TQ ✅ |
+| **招聘难度** | 高（小众） | 低（主流技能） | TQ ✅ |
+| **长期维护** | ⚠️ 不确定 | ✅ Vercel 团队 | TQ ✅ |
+
+#### D.4 决策理由
+
+**不推荐使用 Alova.js 的关键原因**:
+
+1. **项目特性不匹配**
+   - 本项目是企业级应用，需要稳定可靠的技术栈
+   - 微信 API 可能随时变化，需要快速应对和社区支持
+   - 多人协作项目，团队成员对主流技术更熟悉
+
+2. **体积优势不显著**
+   - 20KB 的差异在现代构建工具（Vite + gzip）下可忽略
+   - 桌面端应用对体积不敏感
+   - 代码分割和懒加载可进一步优化
+
+3. **生态系统不成熟**
+   - GitHub Stars 差距巨大（3K vs 39K）
+   - 遇到问题时社区支持不足
+   - 缺乏大规模生产环境验证
+   - Stack Overflow 等平台资源稀少
+
+4. **技术风险高**
+   - 相对年轻的项目（2021年）
+   - 长期维护存在不确定性
+   - 未来可能需要迁移回主流方案（成本高）
+
+5. **团队效率考虑**
+   - 学习新概念需要时间成本
+   - 招聘时难以找到有经验的开发者
+   - 团队对 TanStack Query 更熟悉
+
+6. **React 18+ 支持不明确**
+   - Alova 对 React 18 并发特性的支持程度未知
+   - TanStack Query 对 Suspense、Transitions 等新特性支持完善
+
+#### D.5 推荐方案：TanStack Query + Axios
+
+**TanStack Query 的优势**:
+
+1. **业界标准**: React 生态中最流行的服务端状态管理库
+2. **成熟稳定**: 经过大量生产环境验证
+3. **强大的缓存**: 灵活的缓存策略和失效机制
+4. **完善的 DevTools**: React Query Devtools 功能强大
+5. **React 18+ 支持**: 完美支持 Suspense、Concurrent Features
+6. **丰富的插件**: 持久化、水合、无限滚动等
+7. **Vercel 维护**: 持续更新和长期支持保证
+
+**实施建议**:
+
+```typescript
+// apps/web/src/lib/query-client.ts
+import { QueryClient } from '@tanstack/react-query';
+
+export const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 5 * 60 * 1000,        // 5分钟
+      cacheTime: 10 * 60 * 1000,       // 10分钟
+      refetchOnWindowFocus: false,
+      retry: 3,
+      retryDelay: (attemptIndex) =>
+        Math.min(1000 * 2 ** attemptIndex, 30000)
+    },
+    mutations: {
+      retry: 1
+    }
+  }
+});
+
+// apps/web/src/services/article.service.ts
+export const articleQueries = {
+  list: (params: ArticleListParams) => ({
+    queryKey: ['articles', params],
+    queryFn: () => apiClient.get('/articles', { params }),
+    staleTime: 3 * 60 * 1000
+  }),
+
+  detail: (id: string) => ({
+    queryKey: ['article', id],
+    queryFn: () => apiClient.get(`/articles/${id}`)
+  })
+};
+
+// 使用示例
+const { data, isLoading } = useQuery(articleQueries.list({ page: 1 }));
+```
+
+#### D.6 备选方案（仅供参考）
+
+如果未来项目需求变化，可以考虑以下场景使用 Alova.js：
+
+- ✅ 移动端应用（体积敏感）
+- ✅ 小型项目（快速开发）
+- ✅ 团队主要是中国开发者
+- ✅ 愿意承担新技术风险
+- ✅ 需要 OpenAPI 自动生成功能
+
+但对于本项目（企业级、多人协作、长期维护），**强烈建议保持 TanStack Query + Axios 方案**。
+
+#### D.7 总结
+
+**最终决策**: ❌ 不采用 Alova.js
+**保持方案**: ✅ TanStack Query + Axios
+
+**决策依据**:
+- 项目稳定性 > 体积优化
+- 社区生态 > API 简洁性
+- 长期维护 > 短期便利
+- 团队效率 > 技术新颖性
+
+**行动计划**:
+1. 继续按照第6章的技术栈设计实施
+2. 使用 TanStack Query v5 + Axios 1.6+
+3. 配置完善的缓存策略和错误处理
+4. 集成 React Query Devtools 用于开发调试
+
+---
+
+**评估参考资料**:
+- [Alova.js 官方文档](https://alova.js.org/zh-CN/)
+- [TanStack Query 官方文档](https://tanstack.com/query/latest)
+- [探索alova.js：轻量级请求策略库 - CSDN](https://blog.csdn.net/zw7518/article/details/134575524)
+- [Alova.js 与 axios 的区别](https://www.lycoris.cloud/archives/alova-axios)
