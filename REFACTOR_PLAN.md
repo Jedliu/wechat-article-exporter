@@ -20,6 +20,9 @@
 - [10. 迁移方案](#10-迁移方案)
 - [11. 实施计划](#11-实施计划)
 - [12. 风险评估与应对](#12-风险评估与应对)
+- [13. 关键补充与落地细节](#13-关键补充与落地细节)
+- [14. 总结](#14-总结)
+- [附录](#附录)
 
 ---
 
@@ -494,28 +497,38 @@ packages:
 // stores/auth.store.ts
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import apiClient from '@/services/api.client';
 
 interface AuthState {
   user: User | null;
-  token: string | null;
+  // 建议仅保存在内存（避免持久化到 localStorage 引入 XSS 风险）
+  accessToken: string | null;
   isAuthenticated: boolean;
   login: (credentials: LoginDto) => Promise<void>;
   logout: () => void;
 }
 
-export const useAuthStore = create<AuthState>()(persist(
-  (set) => ({
-    user: null,
-    token: null,
-    isAuthenticated: false,
-    login: async (credentials) => {
-      const { data } = await api.post('/auth/login', credentials);
-      set({ user: data.user, token: data.token, isAuthenticated: true });
-    },
-    logout: () => set({ user: null, token: null, isAuthenticated: false })
-  }),
-  { name: 'auth-storage' }
-));
+export const useAuthStore = create<AuthState>()(
+  persist(
+    (set) => ({
+      user: null,
+      accessToken: null,
+      isAuthenticated: false,
+      login: async (credentials) => {
+        const res = await apiClient.post<ApiResponse<LoginResponse>>('/auth/login', credentials);
+        const payload = res.data.data!;
+        set({ user: payload.user, accessToken: payload.accessToken, isAuthenticated: true });
+      },
+      // 可选：这里也可以调用 /auth/logout 让服务端失效 refresh token
+      logout: () => set({ user: null, accessToken: null, isAuthenticated: false })
+    }),
+    {
+      name: 'auth-storage',
+      // 只持久化用户基本信息，避免把 token 写入 localStorage
+      partialize: (state) => ({ user: state.user })
+    }
+  )
+);
 
 // stores/download.store.ts
 interface DownloadState {
@@ -546,14 +559,16 @@ import { useAuthStore } from '@/stores/auth.store';
 
 const apiClient = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL,
-  timeout: 30000
+  timeout: 30000,
+  // 如果 refresh token 使用 httpOnly cookie，需要开启
+  withCredentials: true
 });
 
 // 请求拦截器：添加认证token
 apiClient.interceptors.request.use((config) => {
-  const token = useAuthStore.getState().token;
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+  const accessToken = useAuthStore.getState().accessToken;
+  if (accessToken) {
+    config.headers.Authorization = `Bearer ${accessToken}`;
   }
   return config;
 });
@@ -564,7 +579,7 @@ apiClient.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       useAuthStore.getState().logout();
-      window.location.href = '/login';
+      window.location.href = '/auth/login';
     }
     return Promise.reject(error);
   }
@@ -578,16 +593,28 @@ import type { Article, ArticleListParams } from '@wechat-exporter/shared/types';
 
 export const articleService = {
   getList: (params: ArticleListParams) =>
-    apiClient.get<Article[]>('/articles', { params }),
+    apiClient.get<PaginatedResponse<Article>>('/articles', { params }),
 
   getById: (id: string) =>
-    apiClient.get<Article>(`/articles/${id}`),
+    apiClient.get<ApiResponse<Article>>(`/articles/${id}`),
+};
 
-  download: (urls: string[]) =>
-    apiClient.post('/articles/download', { urls }),
+// services/download.service.ts
+export const downloadService = {
+  createTask: (dto: CreateDownloadTaskDto) =>
+    apiClient.post<ApiResponse<DownloadResponse>>('/download/tasks', dto),
 
-  export: (params: ExportParams) =>
-    apiClient.post('/articles/export', params, { responseType: 'blob' })
+  cancelTask: (taskId: string) =>
+    apiClient.delete(`/download/tasks/${taskId}`)
+};
+
+// services/export.service.ts
+export const exportService = {
+  createTask: (dto: CreateExportTaskDto) =>
+    apiClient.post<ApiResponse<ExportResponse>>('/export/tasks', dto),
+
+  downloadFile: (taskId: string) =>
+    apiClient.get(`/export/tasks/${taskId}/download`, { responseType: 'blob' })
 };
 ```
 
@@ -597,25 +624,30 @@ export const articleService = {
 
 ```json
 {
-  "dependencies": {
-    "@nestjs/common": "^10.2.0",
-    "@nestjs/core": "^10.2.0",
-    "@nestjs/platform-express": "^10.2.0",
-    "@nestjs/config": "^3.1.0",
-    "@nestjs/jwt": "^10.2.0",
-    "@nestjs/passport": "^10.0.0",
-    "@nestjs/swagger": "^7.1.0",
-    "@mikro-orm/core": "^6.0.0",
-    "@mikro-orm/postgresql": "^6.0.0",
-    "@mikro-orm/nestjs": "^5.2.0",
-    "@nestjs/bullmq": "^10.0.0",
-    "bullmq": "^5.0.0",
-    "ioredis": "^5.3.0",
-    "passport": "^0.7.0",
-    "passport-jwt": "^4.0.0",
-    "passport-local": "^1.0.0",
-    "bcrypt": "^5.1.0",
-    "zod": "^3.22.4",
+	  "dependencies": {
+	    "@nestjs/common": "^10.2.0",
+	    "@nestjs/core": "^10.2.0",
+	    "@nestjs/platform-express": "^10.2.0",
+	    "@nestjs/config": "^3.1.0",
+	    "@nestjs/axios": "^3.0.0",
+	    "@nestjs/jwt": "^10.2.0",
+	    "@nestjs/passport": "^10.0.0",
+	    "@nestjs/swagger": "^7.1.0",
+	    "@nestjs/throttler": "^6.0.0",
+	    "@nestjs/terminus": "^10.0.0",
+	    "@mikro-orm/core": "^6.0.0",
+	    "@mikro-orm/postgresql": "^6.0.0",
+	    "@mikro-orm/nestjs": "^5.2.0",
+	    "@nestjs/bullmq": "^10.0.0",
+	    "bullmq": "^5.0.0",
+	    "ioredis": "^5.3.0",
+	    "cookie-parser": "^1.4.6",
+	    "helmet": "^7.0.0",
+	    "passport": "^0.7.0",
+	    "passport-jwt": "^4.0.0",
+	    "passport-local": "^1.0.0",
+	    "bcrypt": "^5.1.0",
+	    "zod": "^3.22.4",
     "nestjs-zod": "^3.0.0",
     "@anatine/zod-nestjs": "^2.0.0",
     "@anatine/zod-openapi": "^2.0.0",
@@ -636,6 +668,8 @@ export const articleService = {
   }
 }
 ```
+
+> 备注：`@mikro-orm/nestjs` 的版本号不一定与 `@mikro-orm/core` 同步，最终请以官方兼容矩阵为准，并在 `pnpm-lock.yaml` 锁定一组可用版本组合。
 
 #### 6.2.2 模块架构
 
@@ -732,6 +766,11 @@ export class AppModule {}
 └─────────────┘       └──────────────┘
 ```
 
+> 补充说明：
+> - **用户关注/共享关系**：`User` 与 `Account` 实际为 N:N，建议通过 `account_memberships`（或 `account_follows`）维护（支持 follow/unfollow 与共享权限）。
+> - **大字段/文件存储**：`Article.htmlContent` 仅建议用于 MVP/调试，生产推荐对象存储（DB 保存 `htmlKey`/`storageKey`）。
+> - **代理状态**：`Proxy` 的运行态状态更适合放在 Redis（多实例共享）；如需要管理台，可选增加 `proxy_endpoints` 表保存静态配置。
+
 ### 7.2 MikroORM 实体定义
 
 #### 7.2.1 User 实体
@@ -741,6 +780,8 @@ export class AppModule {}
 import { Entity, PrimaryKey, Property, OneToMany, Collection } from '@mikro-orm/core';
 import { WechatAccount } from './wechat-account.entity';
 import { DownloadTask } from './download-task.entity';
+import { ExportTask } from './export-task.entity';
+import { AccountMembership } from './account-membership.entity';
 
 @Entity({ tableName: 'users' })
 export class User {
@@ -767,6 +808,12 @@ export class User {
 
   @OneToMany(() => DownloadTask, task => task.user)
   downloadTasks = new Collection<DownloadTask>(this);
+
+  @OneToMany(() => ExportTask, task => task.user)
+  exportTasks = new Collection<ExportTask>(this);
+
+  @OneToMany(() => AccountMembership, m => m.user)
+  accountMemberships = new Collection<AccountMembership>(this);
 
   @Property({ onCreate: () => new Date() })
   createdAt: Date = new Date();
@@ -828,6 +875,7 @@ export class WechatAccount {
 // database/entities/account.entity.ts
 import { Entity, PrimaryKey, Property, OneToMany, Collection, Index } from '@mikro-orm/core';
 import { Article } from './article.entity';
+import { AccountMembership } from './account-membership.entity';
 
 @Entity({ tableName: 'accounts' })
 export class Account {
@@ -858,6 +906,9 @@ export class Account {
 
   @OneToMany(() => Article, article => article.account)
   articles = new Collection<Article>(this);
+
+  @OneToMany(() => AccountMembership, m => m.account)
+  memberships = new Collection<AccountMembership>(this);
 
   @Property({ onCreate: () => new Date() })
   createdAt: Date = new Date();
@@ -906,7 +957,13 @@ export class Article {
   cover?: string;
 
   @Property({ type: 'text', nullable: true })
-  htmlContent?: string; // 存储HTML内容
+  htmlContent?: string; // MVP/调试：直接存HTML（生产建议对象存储，仅保存 htmlKey）
+
+  @Property({ nullable: true })
+  htmlKey?: string; // 对象存储 Key（推荐）
+
+  @Property({ nullable: true })
+  htmlSha256?: string; // 可选：用于去重/校验
 
   @Property({ nullable: true })
   commentId?: string;
@@ -986,6 +1043,7 @@ export enum DownloadType {
   COMMENTS = 'comments'
 }
 
+// 建议与 ExportTask 复用同一份 TaskStatus（抽到 common/enums/task-status.enum.ts）
 export enum TaskStatus {
   PENDING = 'pending',
   PROCESSING = 'processing',
@@ -1032,14 +1090,240 @@ export class DownloadTask {
 }
 ```
 
+#### 7.2.7 ExportTask 实体
+
+```typescript
+// database/entities/export-task.entity.ts
+import { Entity, PrimaryKey, Property, ManyToOne, Enum, JsonType, Index } from '@mikro-orm/core';
+import { User } from './user.entity';
+
+export enum ExportFormat {
+  EXCEL = 'excel',
+  JSON = 'json',
+  HTML = 'html',
+  MARKDOWN = 'markdown',
+  TXT = 'txt',
+  WORD = 'word'
+}
+
+// 建议抽到 common/enums/task-status.enum.ts（DownloadTask/ExportTask 复用）
+export enum TaskStatus {
+  PENDING = 'pending',
+  PROCESSING = 'processing',
+  COMPLETED = 'completed',
+  FAILED = 'failed',
+  CANCELLED = 'cancelled'
+}
+
+interface ExportOptions {
+  includeMetadata?: boolean;
+  includeComments?: boolean;
+  includeResources?: boolean;
+}
+
+@Entity({ tableName: 'export_tasks' })
+@Index({ properties: ['user', 'createdAt'] })
+export class ExportTask {
+  @PrimaryKey({ type: 'uuid', defaultRaw: 'gen_random_uuid()' })
+  id!: string;
+
+  @ManyToOne(() => User)
+  user!: User;
+
+  @Property({ type: JsonType })
+  articleIds!: string[];
+
+  @Enum(() => ExportFormat)
+  format!: ExportFormat;
+
+  @Enum(() => TaskStatus)
+  status: TaskStatus = TaskStatus.PENDING;
+
+  @Property({ type: JsonType, nullable: true })
+  options?: ExportOptions;
+
+  // 导出文件存储位置（推荐对象存储，仅保存 key；fileUrl 通常为预签名/短期可访问地址）
+  @Property({ nullable: true })
+  fileKey?: string;
+
+  @Property({ nullable: true })
+  fileUrl?: string;
+
+  @Property({ nullable: true, type: 'text' })
+  error?: string;
+
+  @Property({ onCreate: () => new Date() })
+  createdAt: Date = new Date();
+
+  @Property({ nullable: true })
+  completedAt?: Date;
+}
+```
+
+#### 7.2.8 Comment 实体
+
+```typescript
+// database/entities/comment.entity.ts
+import { Entity, PrimaryKey, Property, ManyToOne, Index } from '@mikro-orm/core';
+import { Article } from './article.entity';
+
+@Entity({ tableName: 'comments' })
+@Index({ properties: ['article', 'contentId'], unique: true })
+export class Comment {
+  @PrimaryKey({ type: 'uuid', defaultRaw: 'gen_random_uuid()' })
+  id!: string;
+
+  @ManyToOne(() => Article)
+  article!: Article;
+
+  @Property()
+  @Index()
+  contentId!: string; // 微信侧评论ID
+
+  @Property({ nullable: true })
+  nickName?: string;
+
+  @Property({ nullable: true, type: 'text' })
+  content?: string;
+
+  @Property({ default: 0 })
+  likeNum: number = 0;
+
+  @Property({ nullable: true })
+  createdAt?: Date;
+}
+```
+
+#### 7.2.9 Resource 实体
+
+```typescript
+// database/entities/resource.entity.ts
+import { Entity, PrimaryKey, Property, ManyToOne, Index } from '@mikro-orm/core';
+import { Article } from './article.entity';
+
+export enum ResourceType {
+  IMAGE = 'image',
+  CSS = 'css',
+  JS = 'js',
+  OTHER = 'other'
+}
+
+@Entity({ tableName: 'resources' })
+@Index({ properties: ['article', 'url'], unique: true })
+export class Resource {
+  @PrimaryKey({ type: 'uuid', defaultRaw: 'gen_random_uuid()' })
+  id!: string;
+
+  @ManyToOne(() => Article)
+  article!: Article;
+
+  @Property()
+  @Index()
+  url!: string;
+
+  @Property({ nullable: true })
+  type?: ResourceType;
+
+  @Property({ nullable: true })
+  contentType?: string;
+
+  @Property({ nullable: true })
+  sha256?: string;
+
+  @Property({ nullable: true })
+  size?: number;
+
+  @Property({ nullable: true })
+  storageKey?: string; // S3/OSS Key
+
+  @Property({ onCreate: () => new Date() })
+  createdAt: Date = new Date();
+}
+```
+
+#### 7.2.10 AccountMembership 实体（用户关注/共享）
+
+```typescript
+// database/entities/account-membership.entity.ts
+import { Entity, PrimaryKey, Property, ManyToOne, Enum, Index } from '@mikro-orm/core';
+import { User } from './user.entity';
+import { Account } from './account.entity';
+
+export enum AccountRole {
+  OWNER = 'owner',
+  VIEWER = 'viewer'
+}
+
+@Entity({ tableName: 'account_memberships' })
+@Index({ properties: ['user', 'account'], unique: true })
+export class AccountMembership {
+  @PrimaryKey({ type: 'uuid', defaultRaw: 'gen_random_uuid()' })
+  id!: string;
+
+  @ManyToOne(() => User)
+  user!: User;
+
+  @ManyToOne(() => Account)
+  account!: Account;
+
+  @Enum(() => AccountRole)
+  role: AccountRole = AccountRole.VIEWER;
+
+  @Property({ onCreate: () => new Date() })
+  createdAt: Date = new Date();
+}
+```
+
+#### 7.2.11 ProxyEndpoint 实体（可选，用于管理台；运行态建议放 Redis）
+
+```typescript
+// database/entities/proxy-endpoint.entity.ts
+import { Entity, PrimaryKey, Property, Index } from '@mikro-orm/core';
+
+@Entity({ tableName: 'proxy_endpoints' })
+export class ProxyEndpoint {
+  @PrimaryKey({ type: 'uuid', defaultRaw: 'gen_random_uuid()' })
+  id!: string;
+
+  @Property()
+  @Index({ unique: true })
+  url!: string;
+
+  @Property({ default: true })
+  isActive: boolean = true;
+
+  @Property({ default: 1 })
+  weight: number = 1;
+
+  @Property({ onCreate: () => new Date() })
+  createdAt: Date = new Date();
+
+  @Property({ onUpdate: () => new Date() })
+  updatedAt: Date = new Date();
+}
+```
+
 ### 7.3 数据库索引策略
 
 ```typescript
-// 性能优化索引
-@Index({ properties: ['account', 'publishedAt'] }) // 按公众号和发布时间查询
-@Index({ properties: ['account', 'createdAt'] })   // 按公众号和创建时间查询
-@Index({ properties: ['url'] })                     // URL唯一性和快速查找
-@Index({ properties: ['aid'] })                     // 文章ID查询
+// Article（列表/过滤）
+@Index({ properties: ['account', 'publishedAt'] })
+@Index({ properties: ['account', 'createdAt'] })
+@Index({ properties: ['aid'] })
+@Index({ properties: ['url'], unique: true })
+
+// DownloadTask / ExportTask（任务列表/筛选）
+@Index({ properties: ['user', 'createdAt'] })
+@Index({ properties: ['status'] })
+
+// Comment（去重/查找）
+@Index({ properties: ['article', 'contentId'], unique: true })
+
+// Resource（去重/查找）
+@Index({ properties: ['article', 'url'], unique: true })
+
+// AccountMembership（关注/共享）
+@Index({ properties: ['user', 'account'], unique: true })
 ```
 
 ### 7.4 数据迁移示例
@@ -1050,6 +1334,9 @@ import { Migration } from '@mikro-orm/migrations';
 
 export class Migration20260118000000 extends Migration {
   async up(): Promise<void> {
+    // gen_random_uuid() 依赖 pgcrypto
+    this.addSql('create extension if not exists \"pgcrypto\";');
+
     this.addSql(`
       create table "users" (
         "id" uuid not null default gen_random_uuid(),
@@ -1267,17 +1554,8 @@ interface ArticleDetailDto extends ArticleDto {
   resources?: ResourceDto[];
 }
 
-// POST /api/articles/download - 批量下载文章
-interface DownloadArticlesDto {
-  urls: string[];
-  type: 'html' | 'metadata' | 'comments';
-  withCredential?: boolean; // 是否使用凭证
-}
-
-interface DownloadResponse {
-  taskId: string;
-  status: 'pending' | 'processing';
-}
+// 说明：下载/导出属于“任务域”，统一通过 /api/download/tasks 与 /api/export/tasks 创建任务
+// （可选）兼容旧客户端时，可保留 /api/articles/download 作为 thin wrapper，但不再推荐新增调用方使用
 
 // GET /api/articles/:id/html - 获取文章HTML内容
 // GET /api/articles/:id/metadata - 获取文章元数据
@@ -1294,16 +1572,22 @@ interface CreateDownloadTaskDto {
   accountId?: string;
 }
 
+interface DownloadResponse {
+  taskId: string;
+  status: 'pending' | 'processing';
+}
+
 // GET /api/download/tasks - 获取任务列表
 // GET /api/download/tasks/:id - 获取任务详情
 interface DownloadTaskDto {
   id: string;
   type: string;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
   progress: {
     total: number;
     completed: number;
     failed: number;
+    deleted?: number;
   };
   createdAt: string;
   completedAt?: string;
@@ -1327,6 +1611,11 @@ interface CreateExportTaskDto {
   };
 }
 
+interface ExportResponse {
+  taskId: string;
+  status: 'pending' | 'processing';
+}
+
 // GET /api/export/tasks/:id - 获取导出任务详情
 // GET /api/export/tasks/:id/download - 下载导出文件
 // DELETE /api/export/tasks/:id - 删除导出任务
@@ -1336,11 +1625,11 @@ interface CreateExportTaskDto {
 
 ```typescript
 // modules/article/article.controller.ts
-import { Controller, Get, Post, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { ArticleService } from './article.service';
-import { ArticleListParams, DownloadArticlesDto } from './dto';
+import { ArticleListParams } from './dto';
 
 @ApiTags('articles')
 @Controller('articles')
@@ -1359,12 +1648,6 @@ export class ArticleController {
   @ApiOperation({ summary: '获取文章详情' })
   async getArticle(@Param('id') id: string) {
     return this.articleService.findOne(id);
-  }
-
-  @Post('download')
-  @ApiOperation({ summary: '批量下载文章' })
-  async downloadArticles(@Body() dto: DownloadArticlesDto) {
-    return this.articleService.downloadBatch(dto);
   }
 }
 ```
@@ -1553,6 +1836,7 @@ import { useState, useCallback } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { io, Socket } from 'socket.io-client';
 import { downloadService } from '@/services/download.service';
+import { useAuthStore } from '@/stores/auth.store';
 
 export interface DownloadProgress {
   total: number;
@@ -1572,11 +1856,14 @@ export function useDownload() {
 
   // 创建下载任务
   const downloadMutation = useMutation({
-    mutationFn: downloadService.createTask,
+    mutationFn: async (dto: CreateDownloadTaskDto) => {
+      const res = await downloadService.createTask(dto);
+      return res.data.data!;
+    },
     onSuccess: (data) => {
       // 连接 WebSocket 监听进度
       const ws = io(`${import.meta.env.VITE_WS_URL}/download`, {
-        auth: { token: localStorage.getItem('token') }
+        auth: { token: useAuthStore.getState().accessToken }
       });
 
       ws.emit('subscribe:task', data.taskId);
@@ -1662,10 +1949,24 @@ import Dexie from 'dexie';
 interface MigrationData {
   accounts: any[];
   articles: any[];
+  // 注意：IndexedDB 里的 html/file/resource 往往是 Blob，不能直接 JSON.stringify
   htmlContents: any[];
   metadata: any[];
   comments: any[];
   resources: any[];
+}
+
+async function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      // data:<mime>;base64,<payload>
+      const result = reader.result as string;
+      resolve(result.split(',')[1] || '');
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
 }
 
 async function exportIndexedDB(): Promise<MigrationData> {
@@ -1680,13 +1981,40 @@ async function exportIndexedDB(): Promise<MigrationData> {
     info: 'fakeid'
   });
 
+  const rawHtml = await db.table('html').toArray();
+  const rawResources = await db.table('resource').toArray();
+
+  // 将 Blob 转为可 JSON 序列化的数据（避免导出的 JSON 中出现空对象/丢失内容）
+  const htmlContents = await Promise.all(
+    rawHtml.map(async (row: any) => ({
+      ...row,
+      // HTML 属于文本，优先导出为 string（更直观、体积更小）
+      html: row.file
+        ? (typeof row.file === 'string' ? row.file : await (row.file as Blob).text())
+        : row.html,
+      file: undefined
+    }))
+  );
+
+  // 二进制资源导出为 base64（可选：也可以不导出，导入后按需重新下载）
+  const resources = await Promise.all(
+    rawResources.map(async (row: any) => ({
+      ...row,
+      dataBase64: row.file
+        ? (typeof row.file === 'string' ? row.file : await blobToBase64(row.file as Blob))
+        : row.dataBase64,
+      contentType: row.contentType || (row.file instanceof Blob ? row.file.type : undefined),
+      file: undefined
+    }))
+  );
+
   const data: MigrationData = {
     accounts: await db.table('info').toArray(),
     articles: await db.table('article').toArray(),
-    htmlContents: await db.table('html').toArray(),
+    htmlContents,
     metadata: await db.table('metadata').toArray(),
     comments: await db.table('comment').toArray(),
-    resources: await db.table('resource').toArray()
+    resources
   };
 
   // 导出为 JSON
@@ -1749,7 +2077,12 @@ async function importMigrationData(filePath: string) {
     const article = await em.findOne(Article, { url: htmlData.url });
     if (!article) continue;
 
-    article.htmlContent = await blobToText(htmlData.file);
+    // MVP：直接入库；生产建议上传到对象存储并只保存 htmlKey（见“存储策略”章节）
+    if (typeof htmlData.html === 'string') {
+      article.htmlContent = htmlData.html;
+    } else if (typeof htmlData.fileBase64 === 'string') {
+      article.htmlContent = Buffer.from(htmlData.fileBase64, 'base64').toString('utf8');
+    }
     article.commentId = htmlData.commentID;
   }
   await em.flush();
@@ -1772,14 +2105,6 @@ async function importMigrationData(filePath: string) {
 
   console.log('Migration completed!');
   await orm.close();
-}
-
-function blobToText(blob: Blob): Promise<string> {
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.readAsText(blob);
-  });
 }
 ```
 
@@ -1968,9 +2293,81 @@ function blobToText(blob: Blob): Promise<string> {
 
 ---
 
-## 13. 总结
+## 13. 关键补充与落地细节
 
-### 13.1 重构收益
+### 13.1 数据模型与领域边界（补齐）
+
+1. **关注/共享关系必须落库**：新增 `account_memberships`（`userId` + `accountId` 唯一），用于承载 follow/unfollow 与后续共享权限（owner/viewer）。
+2. **任务领域统一**：下载/导出统一抽象为 Task（状态机、进度、错误、取消），避免“文章域”接口与“任务域”接口重复。
+3. **文件与大字段**：HTML/资源/导出文件推荐对象存储（DB 存 key+hash+size）；`Article.htmlContent` 仅作为 MVP/调试兜底。
+4. **代理状态存储**：代理池运行态（失败次数/冷却/响应时间）建议放 Redis（支持多实例共享）；DB 仅可选保存静态 proxy 列表用于管理台。
+
+### 13.2 共享/权限模型（需要明确决策）
+
+建议在方案中显式写清楚以下“默认策略”，否则后续实现会反复返工：
+
+1. **凭证永不共享**：`WechatAccount.cookies/token/authKey/credentials` 永远只对所属用户可见（包括日志与导出）。
+2. **数据共享的边界**（二选一，需定稿）：
+   - **A. 默认共享**：`Account/Article` 为全局数据，用户通过 `account_memberships` 获得访问权限（更贴近“共享数据”的目标）。
+   - **B. 默认私有 + 显式共享**：`Account/Article` 按 user 分区或通过 share 表控制（更安全，但实现更复杂）。
+3. **RBAC/Scopes**：至少定义 `owner/viewer/admin`（或 scopes），并写到 API 鉴权中（例如导出文件下载、代理状态查看等）。
+4. **审计日志（建议）**：记录关键行为：登录、创建下载/导出任务、下载导出文件、绑定/解绑微信账号、变更共享权限。
+
+### 13.3 存储策略（DB vs 对象存储）与生命周期
+
+1. **DB（PostgreSQL）**：结构化元数据（账号/文章/任务/索引字段），避免把大文件长期塞进 `text`。
+2. **对象存储（S3/OSS/MinIO）**：HTML、资源文件、导出产物。建议字段统一命名为 `storageKey` + `sha256` + `size` + `contentType`。
+3. **清理策略**：
+   - 导出文件设置 TTL（例如 7/30 天），定时清理 + 任务状态标记。
+   - 软删除文章/账号时，资源/HTML 采用“延迟清理 + 引用计数/最后访问时间”避免误删。
+
+### 13.4 队列与后台任务规范（BullMQ）
+
+建议在文档中固定这些规则，避免实现阶段各模块各写一套：
+
+1. **幂等键（Idempotency Key）**：创建任务时生成 `idempotencyKey = hash(userId + type + payload)`，防止重复点击/重试导致重复任务。
+2. **重试与退避**：对可重试错误（网络超时/429/5xx）使用指数退避；不可重试错误（参数校验失败/权限不足）直接失败。
+3. **DLQ/失败归档**：重试耗尽进入 Dead Letter Queue，保留失败原因与最后一次请求上下文（注意脱敏）。
+4. **并发与限流**：按用户/账号维度限制并发（防止单用户把队列打爆），并与代理池/微信侧限流策略联动。
+5. **进度上报**：Worker 使用 `job.updateProgress()` 统一进度结构；API 侧通过 WebSocket/Redis PubSub 向前端推送。
+
+### 13.5 安全（需要从“示例”升级为“标准”）
+
+1. **Token 存储**：前端避免持久化 access token 到 localStorage；推荐 refresh token 使用 httpOnly cookie + 旋转/吊销策略。
+2. **CSRF**：如果使用 cookie 承载会话/refresh token，必须配置 SameSite 策略并引入 CSRF 防护（token 或双提交）。
+3. **敏感数据加密**：`WechatAccount.cookies/credentials` 建议加密存储（至少应用层加密），并明确密钥管理方案（env/KMS/rotate）。
+4. **SSRF 防护**：代理下载/资源下载必须做 URL 白名单/host 校验，禁止内网地址与 file:// 等协议，统一超时与最大响应体限制。
+5. **日志脱敏**：结构化日志中禁止输出 cookie/token/Authorization/Set-Cookie，错误上报同理。
+
+### 13.6 可观测性与运维（生产就绪门槛）
+
+1. **健康检查**：`/health`（liveness）与 `/ready`（readiness），覆盖 DB/Redis/队列连接。
+2. **指标**：队列堆积、任务成功率、代理可用率、下载耗时分布、DB 慢查询、对象存储失败率。
+3. **Tracing（建议）**：OpenTelemetry 打通 API → Worker → 外部请求（微信/代理/对象存储）。
+4. **备份与恢复演练**：PostgreSQL + 对象存储都要有备份策略，并定期做恢复演练（否则“可用”只是幻觉）。
+5. **部署形态**：建议 API 与 Worker 拆部署（水平扩展、隔离资源）；CI/CD 中强制跑迁移与回滚预案。
+
+### 13.7 API 一致性（减少后期返工）
+
+1. **版本化**：建议统一 `/api/v1`（未来兼容迭代），OpenAPI 文档对应版本输出。
+2. **领域边界**：文章域仅提供查询/详情；下载/导出统一走任务域（`/download/tasks`、`/export/tasks`）。
+3. **错误码目录**：建立 error code 规范（模块前缀 + 语义），并在前端做统一映射（toast/重试/引导登录）。
+
+### 13.8 TODO 清单（建议直接转 Jira/Issues）
+
+- [ ] 明确共享模型默认策略（“默认共享” vs “默认私有 + 显式共享”），并据此落库/落 API 鉴权
+- [ ] 落地 `account_memberships`（含 follow/unfollow、角色字段、唯一索引、对应 API）
+- [ ] 定义 Task 统一状态机/进度结构（Download/Export 共用），补齐幂等键、重试策略、DLQ
+- [ ] 明确 HTML/资源/导出文件的存储方案（对象存储 vs DB 兜底），补齐 TTL/清理任务
+- [ ] 明确 Wechat 凭证的加密与密钥管理（加密算法/密钥轮转/脱敏规范）
+- [ ] 补齐安全基线：CSRF/SSRF/Rate Limit/日志脱敏/权限守卫
+- [ ] 补齐生产可观测性：health/metrics/tracing + 压测指标口径
+
+---
+
+## 14. 总结
+
+### 14.1 重构收益
 
 1. **架构升级**: 从单体架构升级到前后端分离，提升可维护性和可扩展性
 2. **数据持久化**: 从浏览器存储迁移到 PostgreSQL，支持多用户和数据共享
@@ -1978,7 +2375,7 @@ function blobToText(blob: Blob): Promise<string> {
 4. **性能提升**: 通过后端缓存、任务队列等优化，提升整体性能
 5. **开发效率**: Monorepo 架构提升代码复用，加快开发速度
 
-### 13.2 技术亮点
+### 14.2 技术亮点
 
 - **Monorepo**: Turborepo + pnpm 实现高效的代码管理
 - **类型安全**: 全栈 TypeScript，共享类型定义
@@ -1987,7 +2384,7 @@ function blobToText(blob: Blob): Promise<string> {
 - **缓存策略**: Redis 多层缓存提升性能
 - **ORM**: MikroORM 提供类型安全的数据库操作
 
-### 13.3 后续规划
+### 14.3 后续规划
 
 - **移动端支持**: 开发 React Native 移动应用
 - **浏览器插件**: 开发 Chrome 扩展，直接从微信文章页面导出
